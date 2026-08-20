@@ -52,8 +52,8 @@ Findings split into two groups: **application code** (the actual Express/Angular
 
 | # | Rule | File:Line | Severity | Notes |
 |---|---|---|---|---|
-| 1 | `express-sequelize-injection` | [routes/login.ts:34](../juice-shop/routes/login.ts#L34) | ERROR | Raw SQL built from user-controlled email/password in login — classic SQL injection (intentional Juice Shop "Login Admin" challenge). |
-| 2 | `express-sequelize-injection` | [routes/search.ts:23](../juice-shop/routes/search.ts#L23) | ERROR | Product search query built via string concatenation — SQL injection. |
+| 1 | `express-sequelize-injection` | [routes/login.ts:34](../juice-shop/routes/login.ts#L34) | ERROR | Raw SQL built from user-controlled email/password in login — classic SQL injection (intentional Juice Shop "Login Admin" challenge). **Fixed:** switched to Sequelize named `replacements` instead of string interpolation. |
+| 2 | `express-sequelize-injection` | [routes/search.ts:23](../juice-shop/routes/search.ts#L23) | ERROR | Product search query built via string concatenation — SQL injection. **Fixed:** switched to Sequelize named `replacements` instead of string interpolation. |
 | 3 | `remote-property-injection` | [routes/currentUser.ts:31](../juice-shop/routes/currentUser.ts#L31) | ERROR | User-controlled property used to index/assign an object — prototype-pollution-adjacent injection risk. |
 | 4 | `code-string-concat` / `eval-detected` | [routes/userProfile.ts:65](../juice-shop/routes/userProfile.ts#L65) | ERROR / WARNING | User profile "name" rendered via string concatenation into a template that gets evaluated — the classic Juice Shop stored-XSS-via-eval challenge. Same line also flagged by ZAP's "Dangerous JS Functions" DAST finding. |
 | 5 | `eval-detected` | [routes/captcha.ts:22](../juice-shop/routes/captcha.ts#L22) | WARNING | `eval()` used to evaluate CAPTCHA answer. |
@@ -78,6 +78,10 @@ Findings split into two groups: **application code** (the actual Express/Angular
 - `npm-missing-minimum-release-age` ×2 — dependency-freshness policy findings, not vulnerabilities per se.
 - `detected-jwt-token` ×3 (in `*.spec.ts` test files) — example JWTs used as test fixtures, not live secrets.
 - `detect-replaceall-sanitization` ×2 (in `data/static/codefixes/*`) and the two `express-sequelize-injection` hits in `data/static/codefixes/*` — these are Juice Shop's own **bundled challenge solutions/exercises** (intentionally vulnerable/fixed code samples shown to players), not the app's live code path.
+
+### Known limitation: RSN (Refactoring Safety Net)
+
+Several fixed lines (e.g. `login.ts:34`, `search.ts:23`) sit inside Juice Shop's own `// vuln-code-snippet` blocks, which back its in-app coding challenges and are checked for consistency against `data/static/codefixes/*` via `npm run rsn`. This project has no local Node/npm toolchain (Docker-only), so that check has not been run — fixing these vulnerabilities is expected to intentionally break the corresponding CTF challenges (e.g. "Login Admin", "Union SQL Injection"), which is out of scope for this security-remediation exercise but worth knowing if you also care about Juice Shop's own challenge suite staying playable.
 
 ## Before / After Summary
 
