@@ -55,22 +55,11 @@ export function getUserProfile () {
     const theme = themes[themeKey] || themes['bluegrey-lightgreen']
 
     if (utils.isChallengeEnabled(challenges.usernameXssChallenge)) {
-      if (username?.match(/#{(.*)}/) !== null) {
-        req.app.locals.abused_ssti_bug = true
-        const code = username?.substring(2, username.length - 1)
-        try {
-          if (!code) {
-            throw new Error('Username is null')
-          }
-          username = eval(code) // eslint-disable-line no-eval
-        } catch (err) {
-          username = '\\' + username
-        }
-      } else {
-        username = '\\' + username
-      }
+      // SECURITY: this used to eval() a `#{...}` expression pulled straight out of the username
+      // (server-side template injection -> arbitrary code execution). The value is now only ever
+      // treated as literal text, HTML-encoded before being spliced into the template.
       if (username) {
-        template = template.replace(/_username_/g, username)
+        template = template.replace(/_username_/g, entities.encode(username))
       }
     } else {
       template = template.replace(/_username_/g, '#{username}')
