@@ -10,10 +10,10 @@ A hands-on application security project: take a deliberately vulnerable app ([OW
 
 | | Baseline | Remediated |
 |---|---|---|
-| ZAP — Fail / Warn / Pass | 0 / 8 / 59 | _pending_ |
-| Semgrep — Error / Warning / total | 18 / 45 / 68 | _pending_ |
+| ZAP — Fail / Warn / Pass | 0 / 8 / 59 | **0 / 5 / 62** |
+| Semgrep — Error / Warning / total | 18 / 45 / 68 | **15 / 35 / 55** |
 
-Full write-up with evidence and fixes: [docs/vulnerabilities.md](docs/vulnerabilities.md)
+Full write-up with evidence and fixes, including what was fixed vs. what remains (and why): [docs/vulnerabilities.md](docs/vulnerabilities.md)
 
 ## Repo structure
 
@@ -63,9 +63,18 @@ docker run --rm -v "$(pwd):/src" semgrep/semgrep semgrep --config auto \
 
 (Same `MSYS_NO_PATHCONV=1` note applies on Windows Git Bash.)
 
+**4. Build and scan the remediated app (after fixes are applied):**
+
+```bash
+docker build -t juice-shop-remediated ./juice-shop
+docker run -d --name juice-shop-remediated-target -p 3001:3000 juice-shop-remediated
+```
+
+Then repeat steps 2–3 against `http://host.docker.internal:3001` / `/src/juice-shop`, writing to `docs/reports/remediated/` instead. No local Node/npm needed — the official `juice-shop/Dockerfile` runs the full `npm install` (which triggers the TypeScript + Angular build via its `postinstall` script) inside the image.
+
 ## Status
 
-Work in progress on branch `security-remediation`. Local only — not pushed to any remote yet.
+Remediation and before/after re-scan complete on branch `security-remediation`. Local only — not pushed to any remote yet.
 
 ## License
 

@@ -87,13 +87,19 @@ Fixing the intentional vulnerabilities is also expected to break their correspon
 
 ## Before / After Summary
 
+Remediated app built from the fixed source via `docker build -t juice-shop-remediated ./juice-shop` (official Dockerfile) and run on port 3001 alongside the untouched baseline on port 3000, so both were scanned with identical tooling for a fair comparison. Spot-checked directly against the running app before scanning: SQL injection payload in login now returns a clean "Invalid email or password." instead of bypassing auth; CORS no longer reflects an arbitrary `Origin`; open-redirect payload now returns `406`; CSP/COEP/COOP/Permissions-Policy headers all present.
+
 | Metric | Baseline | Remediated |
 |---|---|---|
-| ZAP FAIL | 0 | — |
-| ZAP WARN | 8 | — |
-| ZAP PASS | 59 | — |
-| Semgrep ERROR | 18 | — |
-| Semgrep WARNING | 45 | — |
-| Semgrep total | 68 | — |
+| ZAP FAIL | 0 | 0 |
+| ZAP WARN | 8 | **5** |
+| ZAP PASS | 59 | **62** |
+| Semgrep ERROR | 18 | **15** |
+| Semgrep WARNING | 45 | **35** |
+| Semgrep total | 68 | **55** |
 
-_(Filled in after remediation + re-scan.)_
+Full remediated reports: [zap-baseline-report.html](reports/remediated/zap-baseline-report.html) / [zap-baseline-report.json](reports/remediated/zap-baseline-report.json) / [semgrep-remediated.json](reports/remediated/semgrep-remediated.json).
+
+**ZAP — resolved:** CSP Header Not Set, Cross-Domain Misconfiguration, Cross-Origin-Embedder/Opener-Policy Missing (now "Insufficient Site Isolation Against Spectre" — same rule 90004 — PASS), Deprecated Feature-Policy Header (now "Permissions Policy Header Not Set" — PASS). **Still open (unchanged, both flagged as out of scope earlier):** Dangerous JS Functions, Timestamp Disclosure. **New WARNs after remediation:** "CSP: Failure to Define Directive with No Fallback" (×12) — an expected side effect of adding a CSP at all: ours sets `default-src`/`script-src`/`style-src` etc. but not every directive ZAP checks for (e.g. `media-src`), a deliberate trade-off to avoid over-restricting a frontend we can't rebuild-and-test iteratively; and "Storable and Cacheable Content" (×6), a minor caching heuristic, not a fix regression.
+
+**Semgrep — resolved (no longer flagged at all):** SQL injection in `login.ts`/`search.ts`, hardcoded HMAC/JWT secrets in `insecurity.ts`, both `eval()` usages (`userProfile.ts`, `captcha.ts`), directory listing (`server.ts`). **Resolved in behavior but still statically flagged** (Semgrep matches the syntactic shape — e.g. any `res.sendFile()`/`res.redirect()` call with a variable argument, or any assignment shaped like `obj[field] = ...` — not whether a guard around it actually neutralizes the risk, so these remain false-positive-after-fix): path traversal in the four file-serving routes (still calls `res.sendFile()`, now via the traversal-safe `resolveSafePath()`), open redirect in `redirect.ts` (still calls `res.redirect()`, now gated by exact-match allowlist), field-selection injection in `currentUser.ts` (still assigns by dynamic key, now allowlist-gated), and the video-subtitle XSS in `videoHandler.ts` (still splices next to a `<script>` tag, now HTML-encoded first). **Unchanged, already documented as out of scope or false positive:** the four `data/static/codefixes/*` SQLi fixtures, `promotionVideo.pug` false positive, `antiCheat.ts`/`helpers.ts`/`codingChallenges.ts` false positives (unreachable input), `server.ts` format-string false positive, `users.yml` seed-data secret.
