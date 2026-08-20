@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: MIT
  */
 
-import path from 'node:path'
 import { type Request, type Response, type NextFunction } from 'express'
 
 import * as security from '../lib/insecurity'
 import { challenges } from '../data/datacache'
 import * as challengeUtils from '../lib/challengeUtils'
+import { resolveSafePath } from '../lib/utils'
 
 export function servePublicFiles () {
   return ({ params, query }: Request, res: Response, next: NextFunction) => {
@@ -29,7 +29,13 @@ export function servePublicFiles () {
       challengeUtils.solveIf(challenges.directoryListingChallenge, () => { return file.toLowerCase() === 'acquisitions.md' })
       verifySuccessfulPoisonNullByteExploit(file)
 
-      res.sendFile(path.resolve('ftp/', file))
+      const safePath = resolveSafePath('ftp/', file)
+      if (safePath) {
+        res.sendFile(safePath)
+      } else {
+        res.status(403)
+        next(new Error('Invalid file path!'))
+      }
     } else {
       res.status(403)
       next(new Error('Only .md and .pdf files are allowed!'))
