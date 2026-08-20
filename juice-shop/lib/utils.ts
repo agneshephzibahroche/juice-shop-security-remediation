@@ -5,6 +5,7 @@
 
 import packageJson from '../package.json'
 import fs from 'node:fs'
+import path from 'node:path'
 import logger from './logger'
 import config from 'config'
 import download from 'download'
@@ -19,6 +20,16 @@ export { default as isDocker } from './is-docker'
 export { default as isWindows } from './is-windows'
 
 const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+
+// SECURITY: resolves `file` against `baseDir` and verifies the result is actually still inside
+// `baseDir`, rejecting `..`/absolute-path/backslash traversal attempts regardless of how they're
+// encoded. Returns null if `file` would escape `baseDir`. Use this instead of a bare
+// `path.resolve(baseDir, file)` before any res.sendFile()-style call with a user-controlled name.
+export const resolveSafePath = (baseDir: string, file: string): string | null => {
+  const resolvedBase = path.resolve(baseDir) + path.sep
+  const resolvedPath = path.resolve(resolvedBase, file)
+  return resolvedPath.startsWith(resolvedBase) ? resolvedPath : null
+}
 
 export const queryResultToJson = <T>(
   data: T,

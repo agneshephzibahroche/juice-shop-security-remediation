@@ -3,18 +3,19 @@
  * SPDX-License-Identifier: MIT
  */
 
-import path from 'node:path'
 import { type Request, type Response, type NextFunction } from 'express'
+import { resolveSafePath } from '../lib/utils'
 
 export function serveLogFiles () {
   return ({ params }: Request, res: Response, next: NextFunction) => {
     const file = params.file
+    const safePath = resolveSafePath('logs/', file)
 
-    if (!file.includes('/')) {
-      res.sendFile(path.resolve('logs/', file))
+    if (safePath) {
+      res.sendFile(safePath)
     } else {
       res.status(403)
-      next(new Error('File names cannot contain forward slashes!'))
+      next(new Error('Invalid file path!'))
     }
   }
 }
