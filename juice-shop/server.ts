@@ -14,7 +14,6 @@ import http from 'node:http'
 import path from 'node:path'
 import express from 'express'
 import colors from 'colors/safe'
-import serveIndex from 'serve-index'
 import bodyParser from 'body-parser'
 // @ts-expect-error FIXME due to non-existing type definitions for finale-rest
 import * as finale from 'finale-rest'
@@ -237,35 +236,8 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
   /* Checks for challenges solved by abusing SSTi and SSRF bugs */
   app.use('/solve/challenges/server-side', verify.serverSideChallenges())
 
-  /* Create middleware to change paths from the serve-index plugin from absolute to relative */
-  const serveIndexMiddleware = (req: Request, res: Response, next: NextFunction) => {
-    const origEnd = res.end
-    // @ts-expect-error FIXME assignment broken due to seemingly void return value
-    res.end = function () {
-      if (arguments.length && typeof arguments[0] === 'string') {
-        const reqPath = req.originalUrl.replace(/\?.*$/, '')
-
-        const currentFolder = reqPath.split('/').pop()!
-        arguments[0] = arguments[0].replace(/a href="([^"]+?)"/gi, function (matchString: string, matchedUrl: string) {
-          let relativePath = path.relative(reqPath, matchedUrl)
-          if (relativePath === '') {
-            relativePath = currentFolder
-          } else if (!relativePath.startsWith('.') && currentFolder !== '') {
-            relativePath = currentFolder + '/' + relativePath
-          } else {
-            relativePath = relativePath.replace('..', '.')
-          }
-          return 'a href="' + relativePath + '"'
-        })
-      }
-      // @ts-expect-error FIXME passed argument has wrong type
-      origEnd.apply(this, arguments)
-    }
-    next()
-  }
-
-  /* /infrastructure directory browsing */
-  app.use('/infrastructure', serveIndexMiddleware, serveIndex('infrastructure', { icons: true, view: 'details', filter: (filename) => filename !== 'README.md' }))
+  /* SECURITY: /infrastructure directory browsing removed — serveIndex() exposed a full listing of
+     this directory's contents. Direct file access below (by exact path) is preserved. */
   app.use('/infrastructure', verify.accessControlChallenges())
   app.use('/infrastructure', (req: Request, res: Response, next: NextFunction) => {
     const filePath = path.resolve('infrastructure', path.normalize(req.path).replace(/^[\\/]+/, ''))
@@ -284,20 +256,17 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
   })
 
   // vuln-code-snippet start directoryListingChallenge accessLogDisclosureChallenge
-  /* /ftp directory browsing and file download */ // vuln-code-snippet neutral-line directoryListingChallenge
-  app.use('/ftp', serveIndexMiddleware, serveIndex('ftp', { icons: true })) // vuln-code-snippet vuln-line directoryListingChallenge
+  /* SECURITY: directory browsing (serveIndex) removed from /ftp, /.well-known, /encryptionkeys and
+     /support/logs below — each previously exposed a full listing of its directory's contents.
+     Direct file access by exact, allow-listed filename (via servePublicFiles/serveKeyFiles/
+     serveLogFiles/serveQuarantineFiles, all separately hardened against path traversal) is preserved. */
   app.use('/ftp(?!/quarantine)/:file', servePublicFiles()) // vuln-code-snippet vuln-line directoryListingChallenge
   app.use('/ftp/quarantine/:file', serveQuarantineFiles()) // vuln-code-snippet neutral-line directoryListingChallenge
 
-  app.use('/.well-known', serveIndexMiddleware, serveIndex('.well-known', { icons: true, view: 'details' }))
   app.use('/.well-known', express.static('.well-known'))
 
-  /* /encryptionkeys directory browsing */
-  app.use('/encryptionkeys', serveIndexMiddleware, serveIndex('encryptionkeys', { icons: true, view: 'details' }))
   app.use('/encryptionkeys/:file', serveKeyFiles())
 
-  /* /logs directory browsing */ // vuln-code-snippet neutral-line accessLogDisclosureChallenge
-  app.use('/support/logs', serveIndexMiddleware, serveIndex('logs', { icons: true, view: 'details' })) // vuln-code-snippet vuln-line accessLogDisclosureChallenge
   app.use('/support/logs', verify.accessControlChallenges()) // vuln-code-snippet hide-line
   app.use('/support/logs/:file', serveLogFiles()) // vuln-code-snippet vuln-line accessLogDisclosureChallenge
 

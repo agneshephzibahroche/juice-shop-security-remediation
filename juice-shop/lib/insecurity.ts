@@ -134,11 +134,11 @@ export const redirectAllowlist = new Set([
 ])
 
 export const isRedirectAllowed = (url: string) => {
-  let allowed = false
-  for (const allowedUrl of redirectAllowlist) {
-    allowed = allowed || url.includes(allowedUrl) // vuln-code-snippet vuln-line redirectChallenge
-  }
-  return allowed
+  // SECURITY: previously used `url.includes(allowedUrl)`, which passes for any URL that merely
+  // *contains* an allowlisted URL as a substring anywhere (e.g. an attacker-controlled domain with
+  // an allowlisted URL tacked on as a query parameter) — an open redirect. Requiring an exact match
+  // against the allowlist closes that off. // vuln-code-snippet vuln-line redirectChallenge
+  return redirectAllowlist.has(url)
 }
 // vuln-code-snippet end redirectCryptoCurrencyChallenge redirectChallenge
 
