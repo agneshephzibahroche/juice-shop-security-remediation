@@ -68,7 +68,11 @@ export const promotionVideo = () => {
       const pug = (await import('pug')).default
       const fn = pug.compile(template)
       let compiledTemplate = fn()
-      compiledTemplate = compiledTemplate.replace('<script id="subtitle"></script>', '<script id="subtitle" type="text/vtt" data-label="English" data-lang="en">' + subs + '</script>')
+      // SECURITY: `subs` is read verbatim from a subtitle file that can be replaced via the app's
+      // video-upload feature, so it must be treated as untrusted. Previously spliced in raw, letting
+      // a crafted subtitle break out of the <script> tag and inject arbitrary script (the "Video XSS"
+      // challenge). Now HTML-encoded first, which also neutralizes any literal `</script>` breakout.
+      compiledTemplate = compiledTemplate.replace('<script id="subtitle"></script>', '<script id="subtitle" type="text/vtt" data-label="English" data-lang="en">' + entities.encode(subs) + '</script>')
       res.send(compiledTemplate)
     })
   }
