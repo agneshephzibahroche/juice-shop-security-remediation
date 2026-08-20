@@ -23,7 +23,6 @@ import robots from 'express-robots-txt'
 import cookieParser from 'cookie-parser'
 import * as Prometheus from 'prom-client'
 import swaggerUi from 'swagger-ui-express'
-import featurePolicy from 'feature-policy'
 import { IpFilter } from 'express-ipfilter'
 // @ts-expect-error FIXME due to non-existing type definitions for express-security.txt
 import securityTxt from 'express-security.txt'
@@ -177,20 +176,43 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
   /* Compression for all requests */
   app.use(compression())
 
-  /* Bludgeon solution for possible CORS problems: Allow everything! */
-  app.options('*', cors())
-  app.use(cors())
+  // SECURITY: previously `cors()` with no options, which reflects any request's Origin header back
+  // in Access-Control-Allow-Origin — functionally allows every origin (ZAP: "Cross-Domain
+  // Misconfiguration"). Restricted to the app's own configured origin.
+  const corsOptions = { origin: config.get<string>('server.baseUrl') }
+  app.options('*', cors(corsOptions))
+  app.use(cors(corsOptions))
 
   /* Security middleware */
   app.use(helmet.noSniff())
   app.use(helmet.frameguard())
   // app.use(helmet.xssFilter()); // = no protection from persisted XSS via RESTful API
   app.disable('x-powered-by')
-  app.use(featurePolicy({
-    features: {
-      payment: ["'self'"]
+  // SECURITY: replaces the deprecated `feature-policy` header (ZAP: "Deprecated Feature Policy
+  // Header Set") with its successor, Permissions-Policy.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Permissions-Policy', 'payment=(self)')
+    next()
+  })
+  // SECURITY: adds a Content-Security-Policy (ZAP: "CSP Header Not Set"), plus
+  // Cross-Origin-Embedder-Policy / Cross-Origin-Opener-Policy (ZAP: both flagged as missing).
+  // Directives are intentionally permissive enough for the existing Angular frontend to keep
+  // working (inline styles/scripts, eval-based rendering elsewhere in the app) rather than a
+  // maximally strict policy that would need a full frontend audit to verify against.
+  app.use(helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      fontSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'self'"]
     }
   }))
+  app.use(helmet.crossOriginEmbedderPolicy())
+  app.use(helmet.crossOriginOpenerPolicy())
 
   /* Hiring header */
   app.use((req: Request, res: Response, next: NextFunction) => {

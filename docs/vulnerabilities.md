@@ -18,28 +18,25 @@ Result: **0 FAIL, 8 WARN, 59 PASS**. Full reports: [zap-baseline-report.html](re
 
 | # | Finding | Risk | CWE | Count | Status |
 |---|---|---|---|---|---|
-| 1 | Content Security Policy (CSP) Header Not Set | Medium | CWE-693 | 4 | Open |
-| 2 | Cross-Domain Misconfiguration (permissive CORS) | Medium | CWE-264 | 2 | Open |
-| 3 | Cross-Origin-Embedder-Policy Header Missing | Low | CWE-693 | 5 | Open |
-| 4 | Cross-Origin-Opener-Policy Header Missing | Low | CWE-693 | 5 | Open |
-| 5 | Dangerous JS Functions in use (`main.js`) | Low | CWE-749 | 1 | Open |
-| 6 | Deprecated `Feature-Policy` header (should be `Permissions-Policy`) | Low | CWE-16 | 5 | Open |
-| 7 | Timestamp Disclosure (Unix epoch in `styles.css`) | Low | CWE-497 | 5 | Open |
+| 1 | Content Security Policy (CSP) Header Not Set | Medium | CWE-693 | 4 | **Fixed** |
+| 2 | Cross-Domain Misconfiguration (permissive CORS) | Medium | CWE-264 | 2 | **Fixed** |
+| 3 | Cross-Origin-Embedder-Policy Header Missing | Low | CWE-693 | 5 | **Fixed** |
+| 4 | Cross-Origin-Opener-Policy Header Missing | Low | CWE-693 | 5 | **Fixed** |
+| 5 | Dangerous JS Functions in use (`main.js`) | Low | CWE-749 | 1 | Open (frontend bundle, out of scope — see note) |
+| 6 | Deprecated `Feature-Policy` header (should be `Permissions-Policy`) | Low | CWE-16 | 5 | **Fixed** |
+| 7 | Timestamp Disclosure (Unix epoch in `styles.css`) | Low | CWE-497 | 5 | Open (low-risk build artifact — see note) |
 | 8 | Modern Web Application (informational — spidering note) | Info | — | 5 | N/A |
 
-### Detail & planned fix
+### Detail & fix
 
-**1–4: Missing/weak security headers (CSP, CORS, COEP, COOP).**
-Juice Shop's Express server (`app.ts` / `server.ts`) does not set a restrictive `Content-Security-Policy`, scopes CORS too broadly, and omits `Cross-Origin-Embedder-Policy` / `Cross-Origin-Opener-Policy`. Fix: add `helmet()` middleware (or explicit header configuration) with a locked-down CSP (`default-src 'self'`, no `unsafe-inline`/`unsafe-eval` where avoidable), restrict CORS to known origins, and set `Cross-Origin-Embedder-Policy: require-corp` / `Cross-Origin-Opener-Policy: same-origin`.
+**1–4, 6: Missing/weak security headers (CSP, CORS, COEP, COOP, deprecated Feature-Policy).**
+`server.ts` previously used `cors()` with no options (reflects any Origin — functionally allows every origin), only `helmet.noSniff()`/`helmet.frameguard()` (no CSP, no COEP/COOP), and the deprecated `feature-policy` package. **Fixed:** CORS restricted to `config.get('server.baseUrl')`; added `helmet.contentSecurityPolicy()` with a policy permissive enough to keep the existing Angular frontend working (`'self'` plus `'unsafe-inline'`/`'unsafe-eval'` where the app currently relies on them — a maximally strict policy would need a full frontend audit this project doesn't have tooling to run, see [known limitations](#known-limitations)); added `helmet.crossOriginEmbedderPolicy()` / `helmet.crossOriginOpenerPolicy()`; replaced the `feature-policy` middleware with a `Permissions-Policy` header. All in `server.ts`.
 
 **5: Dangerous JS function in `main.js`.**
-ZAP flags use of `eval`/`innerHTML`-style sinks in the bundled Angular app. Fix: locate and replace the flagged sink with a safe DOM API or sanitize input first (Angular's `DomSanitizer` where HTML injection is required).
-
-**6: Deprecated `Feature-Policy` header.**
-Server still emits the old header name. Fix: replace with `Permissions-Policy` (helmet v6+ does this automatically).
+This is a minified/bundled frontend production build artifact, not source — the actual source location isn't directly editable here (no local Node/npm toolchain to rebuild the Angular bundle and verify the fix, see [known limitations](#known-limitations)). Left open; a real fix would locate the flagged sink in `frontend/src/` and rebuild.
 
 **7: Timestamp disclosure.**
-A Unix timestamp is exposed in `styles.css` (likely a cache-busting build artifact, low risk but worth suppressing/confirming non-sensitive).
+A Unix timestamp in `styles.css` (a generated build artifact, not source-controlled). Cosmetic/low-risk — no sensitive data, just a cache-busting value — and not source-editable without a frontend rebuild (same tooling limitation as #5). Left open.
 
 ## SAST — Semgrep
 
@@ -54,7 +51,7 @@ Findings split into two groups: **application code** (the actual Express/Angular
 |---|---|---|---|---|
 | 1 | `express-sequelize-injection` | [routes/login.ts:34](../juice-shop/routes/login.ts#L34) | ERROR | Raw SQL built from user-controlled email/password in login — classic SQL injection (intentional Juice Shop "Login Admin" challenge). **Fixed:** switched to Sequelize named `replacements` instead of string interpolation. |
 | 2 | `express-sequelize-injection` | [routes/search.ts:23](../juice-shop/routes/search.ts#L23) | ERROR | Product search query built via string concatenation — SQL injection. **Fixed:** switched to Sequelize named `replacements` instead of string interpolation. |
-| 3 | `remote-property-injection` | [routes/currentUser.ts:31](../juice-shop/routes/currentUser.ts#L31) | ERROR | User-controlled property used to index/assign an object — prototype-pollution-adjacent injection risk. |
+| 3 | `remote-property-injection` | [routes/currentUser.ts:31](../juice-shop/routes/currentUser.ts#L31) | ERROR | Request-controlled `?fields=` query param assigned directly into a response object with no allowlist — could leak the password hash (`?fields=password`, the "Password Hash Leak" challenge) or supply an object-injection key like `__proto__`. **Fixed:** restricted to a fixed allowlist of non-sensitive fields (`id`, `email`, `lastLoginIp`, `profileImage`). This intentionally breaks the "Password Hash Leak" challenge. |
 | 4 | `code-string-concat` / `eval-detected` | [routes/userProfile.ts:65](../juice-shop/routes/userProfile.ts#L65) | ERROR / WARNING | User profile "name" rendered via string concatenation into a template that gets evaluated — the classic Juice Shop stored-XSS-via-eval / SSTI challenge. Same line also flagged by ZAP's "Dangerous JS Functions" DAST finding. **Fixed:** `eval()` removed entirely; username is now only ever HTML-encoded literal text. This intentionally breaks the "Username XSS"/SSTI challenges (`usernameXssChallenge`, `sstiChallenge`) — see [RSN note](#known-limitation-rsn-refactoring-safety-net). |
 | 5 | `eval-detected` | [routes/captcha.ts:22](../juice-shop/routes/captcha.ts#L22) | WARNING | `eval()` used to evaluate CAPTCHA answer. **Fixed:** replaced with a small precedence-aware `evaluateExpression()` helper — same three-term result, no code execution. (Operands here were always server-generated, not user input, so this was a hardening fix rather than a live exploit path.) |
 | 6 | `hardcoded-hmac-key` (×2) | [lib/insecurity.ts:42](../juice-shop/lib/insecurity.ts#L42), [lib/insecurity.ts:150](../juice-shop/lib/insecurity.ts#L150) | WARNING | Hardcoded HMAC keys used for hashing — should be loaded from environment/secret store. **Fixed:** both now read from `process.env.HMAC_SECRET` / `process.env.JWT_PRIVATE_KEY` (line 150 reuses the private-key variable fixed in #7), with a dev-only fallback retained so the app still runs out of the box locally; the fallback must be overridden via env var in any real deployment. |
@@ -63,12 +60,12 @@ Findings split into two groups: **application code** (the actual Express/Angular
 | 9 | `path-join-resolve-traversal` | [lib/antiCheat.ts:196](../juice-shop/lib/antiCheat.ts#L196) | WARNING | Path built via `path.join`/`resolve` with untrusted input. **Reviewed, no fix needed (false positive):** `relativePath` here only ever comes from the hardcoded internal `challengeSourceFiles` map (see [antiCheat.ts:55](../juice-shop/lib/antiCheat.ts#L55)), never from request input — there's no reachable untrusted-input path to this sink. |
 | 10 | `express-open-redirect` | [routes/redirect.ts:18](../juice-shop/routes/redirect.ts#L18) | WARNING | Redirect target taken from request without allow-list validation. The underlying check in `security.isRedirectAllowed()` used `url.includes(allowedUrl)` — passes for any URL that merely *contains* an allowlisted URL as a substring. **Fixed:** switched to exact match (`redirectAllowlist.has(url)`) in [lib/insecurity.ts](../juice-shop/lib/insecurity.ts). |
 | 11 | `express-check-directory-listing` (×5) | [server.ts:268,288,292,296,300](../juice-shop/server.ts#L268) (pre-fix line numbers) | WARNING | `serve-index` directory browsing enabled on `/infrastructure`, `/ftp`, `/.well-known`, `/encryptionkeys`, `/support/logs` — full directory listings exposed (this *is* the "Directory Listing" and "Access Log Disclosure" challenges). **Fixed:** removed all `serveIndex()` mounts and the now-unused `serveIndexMiddleware` helper/`serve-index` import from `server.ts`; direct file access by exact filename (already hardened against path traversal, see #8) is preserved on all five paths. |
-| 12 | `unknown-value-with-script-tag` | [routes/videoHandler.ts:71](../juice-shop/routes/videoHandler.ts#L71) | WARNING | Unescaped value interpolated where a `<script>` tag context expects sanitization — XSS risk. |
-| 13 | `template-explicit-unescape` | [views/promotionVideo.pug:75](../juice-shop/views/promotionVideo.pug#L75) | WARNING | Pug template explicitly disables auto-escaping (`!=`) for a value — XSS risk if that value is user-influenced. |
-| 14 | `prototype-pollution-loop` | [frontend/src/hacking-instructor/helpers/helpers.ts:49](../juice-shop/frontend/src/hacking-instructor/helpers/helpers.ts#L49) | WARNING | `for...in` loop copying properties without an `own-property` guard — prototype pollution pattern. |
-| 15 | `detect-non-literal-regexp` (×2) | [lib/codingChallenges.ts:76,78](../juice-shop/lib/codingChallenges.ts#L76) | WARNING | RegExp built from non-literal (potentially user-influenced) input — ReDoS risk. |
-| 16 | `unsafe-formatstring` | [server.ts:157](../juice-shop/server.ts#L157) | INFO | Format string built with non-constant input. |
-| 17 | `detected-generic-secret` | [data/static/users.yml:151](../juice-shop/data/static/users.yml#L151) | ERROR | Secret-shaped string in static seed data — expected here (seed/demo data), verify not reused as a real credential. |
+| 12 | `unknown-value-with-script-tag` | [routes/videoHandler.ts:71](../juice-shop/routes/videoHandler.ts#L71) | WARNING | Subtitle-file content (replaceable via the app's video-upload feature, so untrusted) spliced verbatim into a `<script>` tag — real stored XSS (the "Video XSS" challenge). **Fixed:** HTML-encode the content before splicing it in, which also neutralizes literal `</script>` breakout. |
+| 13 | `template-explicit-unescape` | [views/promotionVideo.pug:75](../juice-shop/views/promotionVideo.pug#L75) | WARNING | Pug template explicitly disables auto-escaping (`!=`) for a value — XSS risk if that value is user-influenced. **Reviewed, no fix needed (false positive):** line 75 is the JS inequality operator (`if (splitted.length != 2)`) inside a static, hardcoded `script.` block with no Pug interpolation at all — Semgrep matched the `!=` token textually, not Pug's raw-output syntax. The real XSS risk in this file's rendering path is #12, already fixed. |
+| 14 | `prototype-pollution-loop` | [frontend/src/hacking-instructor/helpers/helpers.ts:49](../juice-shop/frontend/src/hacking-instructor/helpers/helpers.ts#L49) | WARNING | Loop copying properties without an own-property guard — prototype pollution pattern. **Reviewed, no fix needed (false positive):** `options.replacement` is only ever a hardcoded 2-element array (e.g. `['juice-sh.op', 'application.domain']`) baked into this frontend's own tutorial step definitions (see `frontend/src/hacking-instructor/challenges/*.ts`) — never derived from user or network input. |
+| 15 | `detect-non-literal-regexp` (×2) | [lib/codingChallenges.ts:76,78](../juice-shop/lib/codingChallenges.ts#L76) | WARNING | RegExp built from non-literal input — ReDoS risk if that input is attacker-controlled. **Reviewed, no fix needed (false positive):** `challengeKey` here comes exclusively from parsing `// vuln-code-snippet start <keys>` comments in this project's own source files at startup (see `getCodeChallengesFromFile`, [lib/codingChallenges.ts:50](../juice-shop/lib/codingChallenges.ts#L50)) — never from a request. |
+| 16 | `unsafe-formatstring` | [server.ts](../juice-shop/server.ts) (`console.error('Error in timed startup function: ' + name, err)`) | INFO | Format string built with non-constant input. **Reviewed, no fix needed (false positive):** `name` is always a hardcoded literal at every call site (`collectDurationPromise('validatePreconditions', ...)` etc.) — never request-derived — and `err` is passed as a separate argument, not interpolated into the format string. |
+| 17 | `detected-generic-secret` | [data/static/users.yml:151](../juice-shop/data/static/users.yml#L151) | ERROR | Secret-shaped string in static seed data. **Reviewed, no fix needed:** this is intentional demo/seed data (a fixture user record), not a live credential. |
 
 ### Infra / CI findings (out of scope for app remediation, listed for completeness)
 
@@ -79,9 +76,14 @@ Findings split into two groups: **application code** (the actual Express/Angular
 - `detected-jwt-token` ×3 (in `*.spec.ts` test files) — example JWTs used as test fixtures, not live secrets.
 - `detect-replaceall-sanitization` ×2 (in `data/static/codefixes/*`) and the two `express-sequelize-injection` hits in `data/static/codefixes/*` — these are Juice Shop's own **bundled challenge solutions/exercises** (intentionally vulnerable/fixed code samples shown to players), not the app's live code path.
 
-### Known limitation: RSN (Refactoring Safety Net)
+### Known limitations
 
-Several fixed lines (e.g. `login.ts:34`, `search.ts:23`) sit inside Juice Shop's own `// vuln-code-snippet` blocks, which back its in-app coding challenges and are checked for consistency against `data/static/codefixes/*` via `npm run rsn`. This project has no local Node/npm toolchain (Docker-only), so that check has not been run — fixing these vulnerabilities is expected to intentionally break the corresponding CTF challenges (e.g. "Login Admin", "Union SQL Injection"), which is out of scope for this security-remediation exercise but worth knowing if you also care about Juice Shop's own challenge suite staying playable.
+**No local Node/npm/TypeScript toolchain.** This project only has Docker available (see [README.md](../README.md)) — there's no way to run `npm install`, `tsc`, `npm test`, or rebuild the Angular frontend locally to compile-check or test these fixes before the remediated re-scan. All source edits were made by careful manual review of each flagged line and its call sites rather than verified by a build. This mainly affects:
+- **RSN (Refactoring Safety Net)** — several fixed lines (e.g. `login.ts:34`, `search.ts:23`) sit inside Juice Shop's own `// vuln-code-snippet` blocks, checked for consistency against `data/static/codefixes/*` via `npm run rsn`. Not run here.
+- **Frontend bundle findings** (ZAP #5, #7) — left open since they live in a compiled `frontend/dist/` artifact this project can't rebuild.
+- **Helmet API usage** — `helmet.crossOriginEmbedderPolicy()` / `helmet.crossOriginOpenerPolicy()` (added in helmet v4.6.0, which `package.json` pins) haven't been compiled/run to confirm against the exact installed version.
+
+Fixing the intentional vulnerabilities is also expected to break their corresponding CTF challenges (e.g. "Login Admin", "Union SQL Injection", "Username XSS"/SSTI, "Password Hash Leak", "Directory Listing", "Access Log Disclosure") — out of scope for this security-remediation exercise, but worth knowing if you also care about Juice Shop's own challenge suite staying playable.
 
 ## Before / After Summary
 
